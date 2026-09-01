@@ -39,7 +39,7 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
     return user
 
 def create_tokens_for_user(user: User) -> dict:
-    payload = {"sub": str(user.id)}
+    payload = {"sub": str(user.id), "ver": user.token_version}
     return {
         "access_token": create_access_token(payload),
         "refresh_token": create_refresh_token(payload),

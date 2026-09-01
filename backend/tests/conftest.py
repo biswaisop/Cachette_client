@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from app.core.redis_client import RedisClient
 
 from app.main import app
 from app.db.base import Base
@@ -29,6 +30,8 @@ async def db_session():
 
 @pytest_asyncio.fixture(scope="function")
 async def client(db_session):
+    await RedisClient.connect()
+
     async def override_get_db():
         yield db_session
 
@@ -39,3 +42,14 @@ async def client(db_session):
         yield ac
 
     app.dependency_overrides.clear()
+    await RedisClient.disconnect()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clear_rate_limits():
+    await RedisClient.connect()
+    redis_client = await RedisClient.get()
+    keys = await redis_client.keys("ratelimit:*")
+    if keys:
+        await redis_client.delete(*keys)
+    yield

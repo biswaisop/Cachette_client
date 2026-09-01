@@ -65,6 +65,7 @@ async def test_login_nonexistent_user_fails(client):
     })
     assert response.status_code == 401
 
+
 @pytest.mark.asyncio
 async def test_get_current_user_without_token_fails(client):
     response = await client.get("/api/v1/auth/me")

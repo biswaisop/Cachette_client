@@ -24,7 +24,16 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
-
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +51,9 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://dev:dev@localhost:5432/test_filestorage
           SECRET_KEY: ci-test-secret-key
+          REDIS_URL: redis://localhost:6379
+          RESEND_API_KEY: re_test_dummy_key
+
 
       - name: Run tests
         working-directory: ./backend
@@ -49,6 +61,8 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://dev:dev@localhost:5432/test_filestorage
           SECRET_KEY: ci-test-secret-key
+          REDIS_URL: redis://localhost:6379
+          RESEND_API_KEY: re_test_dummy_key
 
   build-and-push:
     needs: test-backend
@@ -80,8 +94,42 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
     
+
+  build-and-push-frontend:
+    needs: test-backend
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+        - uses: actions/checkout@v4
+
+        - name: Configure AWS credentials
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-region: ${{ secrets.AWS_REGION }}
+
+        - name: Login to Amazon ECR
+          id: login-ecr
+          uses: aws-actions/amazon-ecr-login@v2
+
+        - name: Build, tag, and push frontend image
+          working-directory: ./frontend
+          env:
+            ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+            ECR_REPOSITORY: cachette-frontend
+            IMAGE_TAG: ${{ github.sha }}
+          run: |
+            docker build \
+              --build-arg NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }} \
+              -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+              -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+            docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+            docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
   deploy:
-    needs: build-and-push
+    needs: [build-and-push, build-and-push-frontend]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
@@ -95,7 +143,7 @@ jobs:
           script: |
             aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 459653582452.dkr.ecr.us-east-1.amazonaws.com
             cd ~/cachette
+            docker system prune -af --volumes --filter "until=24h"
             docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml up -d --force-recreate
             docker compose -f docker-compose.prod.yml exec -T api alembic upgrade head
-            docker image prune -f

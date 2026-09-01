@@ -14,10 +14,14 @@ class File(Base):
     size = Column(Integer)
     content_type = Column(String(100))
     status = Column(String(20), default="pending")
+    upload_id = Column(String(255), nullable=True)
+    folder_id = Column(UUID(as_uuid=True), ForeignKey("folders.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
 
     owner = relationship("User", back_populates="files")
     shares = relationship("FileShare", back_populates="file")
+    folder = relationship("Folder", back_populates="files")
     share_links = relationship("ShareLink", back_populates="file")
 
     __table_args__ = (
